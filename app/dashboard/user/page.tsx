@@ -116,26 +116,45 @@ export default function UserDashboard() {
     if (!lostPersonForm.name || !lostPersonForm.description) return
 
     setIsSearching(true)
-    // Mock search delay
-    setTimeout(() => {
-      setSearchResults([
-        {
-          id: 1,
-          confidence: 92,
-          location: "Food Court - Camera 3",
-          timestamp: "11:23 AM",
-          image: "/placeholder-irf4t.png",
-        },
-        {
-          id: 2,
-          confidence: 78,
-          location: "Main Stage - Camera 1",
-          timestamp: "11:18 AM",
-          image: "/person-near-stage.jpg",
-        },
-      ])
+    
+    try {
+      if (lostPersonForm.image) {
+        const formData = new FormData()
+        formData.append("type", "person_register")
+        formData.append("file", lostPersonForm.image)
+        formData.append("name", lostPersonForm.name)
+        formData.append("description", lostPersonForm.description)
+        formData.append("lastSeen", lostPersonForm.lastSeen)
+        formData.append("contact", lostPersonForm.contact)
+        
+        const response = await fetch("/api/vision", {
+          method: "POST",
+          body: formData
+        })
+        
+        if (response.ok) {
+          const result = await response.json()
+          alert(`Person registered with AI System! ID: ${result.person_id}`)
+          // Clear form after successful registration
+          setLostPersonForm({
+            name: "",
+            description: "",
+            lastSeen: "",
+            contact: "",
+            image: null,
+          })
+        } else {
+          alert("Could not register with AI. Backend might be unreachable.")
+        }
+      } else {
+        alert("Please upload a photo for AI facial recognition.")
+      }
+    } catch (error) {
+      console.error(error)
+      alert("Error contacting the vision system.")
+    } finally {
       setIsSearching(false)
-    }, 2000)
+    }
   }
 
   const handleTabChange = (value: string) => {

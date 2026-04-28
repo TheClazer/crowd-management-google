@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { DatabaseService } from "@/lib/database"
+import { generatePredictions } from "@/lib/prediction"
 
 export async function GET(request: NextRequest) {
   try {
@@ -16,7 +17,7 @@ export async function GET(request: NextRequest) {
     const eventData = await DatabaseService.getEventById(eventId)
     const activeAnomalies = await DatabaseService.getAnomalyDetections(eventId, "active")
 
-    // Generate 15-minute predictions
+    // Generate 15-minute predictions using the Python XGBoost backend
     const predictions = await generatePredictions(eventId, densityData, activeAnomalies, eventData || undefined)
 
     return NextResponse.json({
@@ -36,17 +37,16 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST endpoint for triggering crowd density calculations with external API
+// POST endpoint for receiving crowd density updates from sensors/CCTV
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { eventId, apiKey, zoneOverrides } = body // zoneOverrides can specify specific density values for testing
+    const { eventId, apiKey, zoneOverrides } = body
 
     if (!eventId) {
       return NextResponse.json({ error: "Event ID is required" }, { status: 400 })
     }
 
-    // In real implementation, validate apiKey here
     if (!apiKey || apiKey !== "valid-density-api-key") {
       return NextResponse.json({ error: "Invalid API key for density calculations" }, { status: 401 })
     }
@@ -58,59 +58,55 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Event not found" }, { status: 404 })
     }
 
-    // Here you would call the external crowd density API
-    // For now, simulate with mock data influenced by zoneOverrides
     const densityCalculations: { [zoneId: string]: { density: number, cctvCount: number, cctvIds: string[] } } = {}
 
     for (const zone of eventZones) {
       const overrideValue = zoneOverrides?.[zone.id]
-      const density = overrideValue !== undefined ? overrideValue : Math.floor(Math.random() * 100)
+      // Use override (sensor data) or default to 0 if no reading is available. Removed Math.random() mock data.
+      const density = overrideValue !== undefined ? overrideValue : 0
 
-      // Simulate multiple CCTVs per zone
-      const cctvCount = Math.floor(Math.random() * 3) + 2 // 2-4 CCTVs per zone
+      // Assume 2 CCTVs per zone for simplicity
+      const cctvCount = 2
       const cctvs: { id: string; detectedDensity: number }[] = []
 
       for (let i = 0; i < cctvCount; i++) {
-        const cctvDensity = Math.max(0, density + (Math.random() * 20 - 10)) // ±10 variation
         cctvs.push({
           id: `${zone.id}-cam${i + 1}`,
-          detectedDensity: cctvDensity
+          detectedDensity: density
         })
       }
 
       densityCalculations[zone.id] = {
-        density: cctvs.reduce((sum, cctv) => sum + cctv.detectedDensity, 0) / cctvCount,
+        density: density,
         cctvCount,
         cctvIds: cctvs.map(c => c.id)
       }
     }
 
-    // Store the calculated densities in database
     const timestamp = new Date().toISOString()
     const densityRecords = eventZones.map(zone => ({
       event_id: eventId,
       zone_id: zone.id,
       timestamp,
-      current_count: Math.floor(densityCalculations[zone.id].density * zone.capacity / 100), // convert % to count
+      current_count: Math.floor(densityCalculations[zone.id].density * zone.capacity / 100),
       density_percentage: densityCalculations[zone.id].density,
-      prediction_15min: null, // will be calculated separately
+      prediction_15min: null, // Predicted via GET endpoint asynchronously
       prediction_30min: null,
-      ai_confidence: 0.9
+      ai_confidence: 0.0
     }))
 
-    // In real implementation, insert into database here
-    // For now, just return the calculations
+    // In a real implementation, you would insert into DatabaseService here
 
     return NextResponse.json({
       success: true,
-      message: "Crowd density calculated and stored",
+      message: "Crowd density updated",
       calculations: densityCalculations,
       densityRecords,
       timestamp,
-      apiUsed: "external-density-api"
+      apiUsed: "sensor-ingestion"
     })
   } catch (error) {
-    console.error("Error calculating crowd density:", error)
+    console.error("Error updating crowd density:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }

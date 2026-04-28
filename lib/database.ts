@@ -105,17 +105,36 @@ export interface LostPerson {
   updated_at: string
 }
 
-// Initialize Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+// Initialize Supabase client — gracefully handle missing env vars
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ""
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
 
-export const supabase = createClient(supabaseUrl, supabaseKey)
+let supabaseInstance: ReturnType<typeof createClient> | null = null
+
+function getSupabase() {
+  if (!supabaseUrl || !supabaseKey) {
+    console.warn("⚠️ Supabase credentials not configured. Database operations will return empty/mock data.")
+    return null
+  }
+  if (!supabaseInstance) {
+    supabaseInstance = createClient(supabaseUrl, supabaseKey)
+  }
+  return supabaseInstance
+}
+
+export const supabase = getSupabase()!
 
 // Database service functions
 export class DatabaseService {
+  private static db() {
+    return getSupabase()
+  }
+
   // Event operations
   static async getActiveEvent(): Promise<Event | null> {
-    const { data, error } = await supabase.from("events").select("*").eq("status", "active").single()
+    const db = this.db()
+    if (!db) return null
+    const { data, error } = await db.from("events").select("*").eq("status", "active").single()
 
     if (error) {
       console.error("Error fetching active event:", error)
@@ -126,7 +145,9 @@ export class DatabaseService {
   }
 
   static async getEventById(id: string): Promise<Event | null> {
-    const { data, error } = await supabase.from("events").select("*").eq("id", id).single()
+    const db = this.db()
+    if (!db) return null
+    const { data, error } = await db.from("events").select("*").eq("id", id).single()
 
     if (error) {
       console.error("Error fetching event:", error)
@@ -138,7 +159,9 @@ export class DatabaseService {
 
   // Zone operations
   static async getEventZones(eventId: string): Promise<Zone[]> {
-    const { data, error } = await supabase.from("zones").select("*").eq("event_id", eventId).order("name")
+    const db = this.db()
+    if (!db) return []
+    const { data, error } = await db.from("zones").select("*").eq("event_id", eventId).order("name")
 
     if (error) {
       console.error("Error fetching zones:", error)
@@ -150,7 +173,9 @@ export class DatabaseService {
 
   // Incident operations
   static async getIncidents(eventId: string, status?: string, assignedTo?: string): Promise<Incident[]> {
-    let query = supabase.from("incidents").select("*").eq("event_id", eventId)
+    const db = this.db()
+    if (!db) return []
+    let query = db.from("incidents").select("*").eq("event_id", eventId)
 
     if (status) {
       query = query.eq("status", status)
@@ -171,7 +196,9 @@ export class DatabaseService {
   }
 
   static async createIncident(incident: Omit<Incident, "id" | "created_at" | "updated_at">): Promise<Incident | null> {
-    const { data, error } = await supabase.from("incidents").insert(incident).select().single()
+    const db = this.db()
+    if (!db) return null
+    const { data, error } = await db.from("incidents").insert(incident).select().single()
 
     if (error) {
       console.error("Error creating incident:", error)
@@ -182,7 +209,9 @@ export class DatabaseService {
   }
 
   static async updateIncident(id: string, updates: Partial<Incident>): Promise<Incident | null> {
-    const { data, error } = await supabase
+    const db = this.db()
+    if (!db) return null
+    const { data, error } = await db
       .from("incidents")
       .update({ ...updates, updated_at: new Date().toISOString() })
       .eq("id", id)
@@ -199,7 +228,9 @@ export class DatabaseService {
 
   // Crowd density operations
   static async getLatestCrowdDensity(eventId: string): Promise<CrowdDensity[]> {
-    const { data, error } = await supabase
+    const db = this.db()
+    if (!db) return []
+    const { data, error } = await db
       .from("crowd_density")
       .select(`
         *,
@@ -218,9 +249,11 @@ export class DatabaseService {
   }
 
   static async getCrowdDensityHistory(eventId: string, zoneId?: string, hours = 24): Promise<CrowdDensity[]> {
+    const db = this.db()
+    if (!db) return []
     const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString()
 
-    let query = supabase.from("crowd_density").select("*").eq("event_id", eventId).gte("timestamp", since)
+    let query = db.from("crowd_density").select("*").eq("event_id", eventId).gte("timestamp", since)
 
     if (zoneId) {
       query = query.eq("zone_id", zoneId)
@@ -238,7 +271,9 @@ export class DatabaseService {
 
   // Anomaly detection operations
   static async getAnomalyDetections(eventId: string, status?: string): Promise<AnomalyDetection[]> {
-    let query = supabase
+    const db = this.db()
+    if (!db) return []
+    let query = db
       .from("anomaly_detections")
       .select(`
         *,
@@ -261,9 +296,26 @@ export class DatabaseService {
     return data || []
   }
 
+  static async createAnomalyDetection(
+    anomaly: Partial<AnomalyDetection>
+  ): Promise<AnomalyDetection | null> {
+    const db = this.db()
+    if (!db) { console.warn("⚠️ Skipping anomaly insert — no DB configured"); return null }
+    const { data, error } = await db.from("anomaly_detections").insert(anomaly).select().single()
+
+    if (error) {
+      console.error("Error creating anomaly detection:", error)
+      return null
+    }
+
+    return data
+  }
+
   // Lost person operations
   static async getLostPersons(eventId: string, status?: string): Promise<LostPerson[]> {
-    let query = supabase.from("lost_persons").select("*").eq("event_id", eventId)
+    const db = this.db()
+    if (!db) return []
+    let query = db.from("lost_persons").select("*").eq("event_id", eventId)
 
     if (status) {
       query = query.eq("status", status)
@@ -280,9 +332,11 @@ export class DatabaseService {
   }
 
   static async createLostPersonReport(
-    report: Omit<LostPerson, "id" | "created_at" | "updated_at">,
+    report: Partial<LostPerson>,
   ): Promise<LostPerson | null> {
-    const { data, error } = await supabase.from("lost_persons").insert(report).select().single()
+    const db = this.db()
+    if (!db) { console.warn("⚠️ Skipping lost person insert — no DB configured"); return null }
+    const { data, error } = await db.from("lost_persons").insert(report).select().single()
 
     if (error) {
       console.error("Error creating lost person report:", error)
@@ -294,7 +348,9 @@ export class DatabaseService {
 
   // User operations
   static async getUserById(id: string): Promise<User | null> {
-    const { data, error } = await supabase.from("users").select("*").eq("id", id).single()
+    const db = this.db()
+    if (!db) return null
+    const { data, error } = await db.from("users").select("*").eq("id", id).single()
 
     if (error) {
       console.error("Error fetching user:", error)
@@ -305,7 +361,9 @@ export class DatabaseService {
   }
 
   static async getResponders(eventId: string): Promise<User[]> {
-    const { data, error } = await supabase
+    const db = this.db()
+    if (!db) return []
+    const { data, error } = await db
       .from("users")
       .select("*")
       .eq("role", "responder")
@@ -322,7 +380,9 @@ export class DatabaseService {
 
   // System metrics
   static async getSystemMetrics(eventId: string, metricType?: string): Promise<any[]> {
-    let query = supabase.from("system_metrics").select("*").eq("event_id", eventId)
+    const db = this.db()
+    if (!db) return []
+    let query = db.from("system_metrics").select("*").eq("event_id", eventId)
 
     if (metricType) {
       query = query.eq("metric_type", metricType)
@@ -340,7 +400,9 @@ export class DatabaseService {
 
   // Real-time subscriptions
   static subscribeToIncidents(eventId: string, callback: (payload: any) => void) {
-    return supabase
+    const db = this.db()
+    if (!db) return null
+    return db
       .channel("incidents")
       .on(
         "postgres_changes",
@@ -356,7 +418,9 @@ export class DatabaseService {
   }
 
   static subscribeToCrowdDensity(eventId: string, callback: (payload: any) => void) {
-    return supabase
+    const db = this.db()
+    if (!db) return null
+    return db
       .channel("crowd_density")
       .on(
         "postgres_changes",
@@ -372,7 +436,9 @@ export class DatabaseService {
   }
 
   static subscribeToAnomalies(eventId: string, callback: (payload: any) => void) {
-    return supabase
+    const db = this.db()
+    if (!db) return null
+    return db
       .channel("anomaly_detections")
       .on(
         "postgres_changes",

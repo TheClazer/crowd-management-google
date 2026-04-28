@@ -78,13 +78,44 @@ export default function ReportIncidentPage() {
 
     setIsSubmitting(true)
 
-    // Mock submission delay
-    setTimeout(() => {
+    try {
+      let aiAnalysis = ""
+      if (attachedFiles.length > 0) {
+        const visionFormData = new FormData()
+        visionFormData.append("type", "anomaly")
+        visionFormData.append("file", attachedFiles[0])
+        visionFormData.append("location", formData.location)
+        
+        const response = await fetch("/api/vision", {
+          method: "POST",
+          body: visionFormData
+        })
+        
+        if (response.ok) {
+          const result = await response.json()
+          if (result.detection_type && result.detection_type !== "none") {
+            const confidence = (result.confidence * 100).toFixed(1)
+            aiAnalysis = `\n[AI Detection: ${result.detection_type} with ${confidence}% confidence]`
+            alert(`AI Analysis Complete! Detected: ${result.detection_type} (${confidence}% confidence). Record saved.`)
+          }
+        }
+      }
+
+      // Update description with AI findings if any
+      setFormData(prev => ({
+        ...prev,
+        description: prev.description + aiAnalysis
+      }))
+
       const generatedId = "INC-" + Math.random().toString(36).substr(2, 9).toUpperCase()
       setIncidentId(generatedId)
       setIsSubmitted(true)
+    } catch (error) {
+      console.error("Submission error:", error)
+      alert("Failed to submit incident report")
+    } finally {
       setIsSubmitting(false)
-    }, 2000)
+    }
   }
 
   if (isSubmitted) {
