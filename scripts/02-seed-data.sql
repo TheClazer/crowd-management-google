@@ -1,98 +1,4 @@
-// app/api/predict/train/route.ts
-import { NextResponse, type NextRequest } from "next/server"
-import fs from "fs"
-import path from "path"
-
-type TrainRow = { timestamp?: string; zone_id: string; total_people: number }
-type TrainBody = { event_id?: string; training_data: TrainRow[]; scale?: number }
-
-function buildAlignedSeries(zones: string[], rows: TrainRow[]) {
-  const byZone = new Map<string, { t: number; v: number }[]>()
-  for (const r of rows) {
-    const z = r.zone_id
-    if (!byZone.has(z)) byZone.set(z, [])
-    byZone.get(z)!.push({ t: new Date(r.timestamp ?? Date.now()).getTime(), v: Number(r.total_people) || 0 })
-  }
-  for (const arr of byZone.values()) arr.sort((a, b) => a.t - b.t)
-  const timeline = Array.from(new Set(Array.from(byZone.values()).flatMap(a => a.map(x => x.t)))).sort((a, b) => a - b)
-  const zoneSeries = new Map<string, number[]>()
-  for (const z of zones) {
-    const arr = byZone.get(z) ?? []
-    let j = 0
-    let last = 0
-    const series: number[] = []
-    for (let i = 0; i < timeline.length; i++) {
-      const t = timeline[i]
-      while (j < arr.length && arr[j].t <= t) {
-        last = arr[j].v
-        j++
-      }
-      series.push(last)
-    }
-    zoneSeries.set(z, series)
-  }
-  return { timeline, zoneSeries }
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const body = (await request.json()) as TrainBody
-    const rows = Array.isArray(body.training_data) ? body.training_data : []
-    const zones = Array.from(new Set(rows.map(r => r.zone_id))).sort().slice(0, 10)
-    if (zones.length === 0) return NextResponse.json({ error: "no zones" }, { status: 400 })
-    const { timeline, zoneSeries } = buildAlignedSeries(zones, rows)
-    if (timeline.length < 80) return NextResponse.json({ error: "insufficient history" }, { status: 400 })
-    const tsDates = timeline.map(t => new Date(t))
-    const scale = Math.max(1, body.scale ?? 150)
-    const samples: { x: number[]; y: number[] }[] = []
-    for (let i = 60; i < timeline.length - 15; i++) {
-      const x: number[] = []
-      for (const z of zones) {
-        const s = zoneSeries.get(z) ?? []
-        const w = s.slice(i - 60, i).map(v => v / scale)
-        x.push(...w)
-      }
-      const td = tsDates[i + 15]
-      x.push(td.getMinutes() / 60)
-      x.push(td.getHours() / 24)
-      x.push(td.getDay() / 7)
-      const y: number[] = []
-      for (const z of zones) {
-        const s = zoneSeries.get(z) ?? []
-        y.push((s[i + 15] ?? 0) / scale)
-      }
-      samples.push({ x, y })
-    }
-    if (samples.length === 0) return NextResponse.json({ error: "no windows" }, { status: 400 })
-    const featDim = samples[0].x.length
-    const weights: Record<string, { w: number[]; b: number }> = {}
-    for (let zi = 0; zi < zones.length; zi++) {
-      let w = new Array(featDim).fill(0)
-      let b = 0
-      const lr = 1e-3
-      const reg = 1e-4
-      const epochs = 5
-      for (let e = 0; e < epochs; e++) {
-        for (const s of samples) {
-          let yhat = b
-          for (let k = 0; k < featDim; k++) yhat += w[k] * s.x[k]
-          const err = yhat - s.y[zi]
-          for (let k = 0; k < featDim; k++) w[k] -= lr * (err * s.x[k] + reg * w[k])
-          b -= lr * err
-        }
-      }
-      weights[zones[zi]] = { w, b }
-    }
-    const out = { feature_dim: featDim, zones, scale, weights, trained_at: new Date().toISOString(), event_id: body.event_id ?? null }
-    const dir = path.join(process.cwd(), "public", "models", "15min")
-    fs.mkdirSync(dir, { recursive: true })
-    const fp = path.join(dir, "weights.json")
-    fs.writeFileSync(fp, JSON.stringify(out))
-    return NextResponse.json({ message: "trained", path: "/models/15min/weights.json", zones, feature_dim: featDim, samples: samples.length })
-  } catch {
-    return NextResponse.json({ error: "training failed" }, { status: 500 })
-  }
-}-- Seed data for CrowdGuard platform
+-- Seed data for CrowdGuard platform
 -- Insert sample event, users, zones, and initial data
 
 -- Insert sample event
@@ -148,7 +54,22 @@ INSERT INTO crowd_density (event_id, zone_id, timestamp, current_count, density_
 ('550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440011', NOW() - INTERVAL '2 hours', 1200, 60.0, 65.0, 70.0, 82.3),
 ('550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440011', NOW() - INTERVAL '1 hour', 1400, 70.0, 72.5, 68.0, 85.1),
 ('550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440011', NOW() - INTERVAL '30 minutes', 1560, 78.0, 75.0, 72.0, 86.8),
-('550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440011', NOW(), 1440, 72.0, 68.5, 65.0, 84.9);
+('550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440011', NOW(), 1440, 72.0, 68.5, 65.0, 84.9),
+-- Entrance A data
+('550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440012', NOW() - INTERVAL '2 hours', 600, 60.0, 68.0, 74.0, 83.5),
+('550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440012', NOW() - INTERVAL '1 hour', 780, 78.0, 84.0, 88.0, 85.9),
+('550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440012', NOW() - INTERVAL '30 minutes', 880, 88.0, 91.0, 86.0, 88.4),
+('550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440012', NOW(), 820, 82.0, 79.0, 75.0, 87.1),
+-- VIP Area data
+('550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440013', NOW() - INTERVAL '2 hours', 210, 42.0, 46.0, 50.0, 80.0),
+('550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440013', NOW() - INTERVAL '1 hour', 260, 52.0, 55.0, 58.0, 81.7),
+('550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440013', NOW() - INTERVAL '30 minutes', 300, 60.0, 62.0, 64.0, 83.2),
+('550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440013', NOW(), 280, 56.0, 54.0, 52.0, 82.5),
+-- Parking Lot data
+('550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440014', NOW() - INTERVAL '2 hours', 1500, 75.0, 70.0, 66.0, 79.4),
+('550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440014', NOW() - INTERVAL '1 hour', 1300, 65.0, 60.0, 56.0, 80.8),
+('550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440014', NOW() - INTERVAL '30 minutes', 1100, 55.0, 52.0, 50.0, 82.1),
+('550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440014', NOW(), 1000, 50.0, 48.0, 46.0, 83.0);
 
 -- Insert AI anomaly detections
 INSERT INTO anomaly_detections (id, event_id, camera_id, zone_id, detection_type, confidence, description, status, detected_at) VALUES

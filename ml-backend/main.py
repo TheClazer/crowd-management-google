@@ -1,4 +1,6 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 import pickle
@@ -19,28 +21,58 @@ try:
 except ImportError:
     FACE_REC_AVAILABLE = False
 
-app = FastAPI(title="Crowd Management ML Backend")
-
 # Load models on startup
 MODEL_PATH = "xgboost_crowd_model.pkl"
 model_data = None
 yolo_model = None
 
-@app.on_event("startup")
-def load_models():
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Load ML models once on startup using the FastAPI lifespan protocol."""
     global model_data, yolo_model
+
     if os.path.exists(MODEL_PATH):
         with open(MODEL_PATH, "rb") as f:
             model_data = pickle.load(f)
         print("Model loaded successfully.")
     else:
         print(f"Warning: {MODEL_PATH} not found. Please train the model first.")
-        
+
     try:
         yolo_model = YOLO("yolov8n.pt")
         print("YOLOv8 model loaded successfully.")
     except Exception as e:
         print(f"Failed to load YOLOv8 model: {e}")
+
+    yield
+    # (No teardown required — process exit releases the loaded models.)
+
+
+app = FastAPI(title="Crowd Management ML Backend", lifespan=lifespan)
+
+# Allow direct calls in dev (the Next.js API routes proxy here, but the backend
+# may also be hit straight from a browser / tooling during development).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/health")
+def health():
+    """Liveness probe + model availability flags."""
+    return {
+        "status": "ok",
+        "models": {
+            "xgboost": model_data is not None,
+            "yolo": yolo_model is not None,
+            "face": FACE_REC_AVAILABLE,
+        },
+    }
 
 class PredictionRequest(BaseModel):
     event_id: str
@@ -62,7 +94,7 @@ def hash_zone(zone_id_str):
 
 @app.post("/predict/crowd-density", response_model=PredictionResponse)
 def predict_crowd_density(req: PredictionRequest):
-    if not model_data:
+    if model_data is None:
         raise HTTPException(status_code=503, detail="Model is not loaded.")
         
     model = model_data['model']
@@ -102,7 +134,7 @@ def predict_crowd_density(req: PredictionRequest):
 
 @app.post("/analyze/anomaly", response_model=AnomalyDetectionResponse)
 async def analyze_anomaly(file: Optional[UploadFile] = File(None), base64_image: Optional[str] = Form(None), metadata_duration: Optional[int] = Form(0)):
-    if not yolo_model:
+    if yolo_model is None:
         raise HTTPException(status_code=503, detail="YOLOv8 model is not loaded.")
         
     img = None
@@ -285,5 +317,12 @@ async def match_person(file: Optional[UploadFile] = File(None), base64_image: Op
             confidence=round(confidence, 2),
             bounding_box=best_match_box
         )
-        
+
     return PersonMatchResponse(person_id=None, confidence=0.0, bounding_box=None)
+
+
+# Documented run port is 8001:
+#   uvicorn main:app --host 0.0.0.0 --port 8001
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8001)

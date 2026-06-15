@@ -1,4 +1,13 @@
-// Test script for the new crowd prediction API
+// Smoke test: XGBoost crowd-density 15-min forecasts via /api/crowd-density.
+//
+// PREREQUISITES:
+//   1. A dev server must be running:  npm run dev   (serves http://localhost:3000)
+//   2. Node 18+ (uses the built-in global `fetch`).
+// RUN:  node test_predict_api.js
+//
+// The Python ML backend is OPTIONAL — when it is unreachable, lib/prediction.ts
+// returns realistic fallback forecasts, so this passes in pure demo mode.
+
 const BASE_URL = 'http://localhost:3000';
 
 async function testPredictionAPI() {

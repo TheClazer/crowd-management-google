@@ -16,8 +16,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files
+# env files (but keep the committed template)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -28,6 +29,8 @@ next-env.d.ts
 
 # python
 ml-backend/venv/
+venv/
+.venv/
 __pycache__/
 *.py[cod]
 *$py.class

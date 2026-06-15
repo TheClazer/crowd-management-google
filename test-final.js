@@ -1,3 +1,12 @@
+// Smoke test: RAG protocol assistant (asserts a non-truncated response).
+//
+// PREREQUISITES:
+//   1. A dev server must be running:  npm run dev   (serves http://localhost:3000)
+//   2. Node 18+ (uses the built-in global `fetch`).
+// RUN:  node test-final.js
+//
+// Works fully offline (demo keyword fallback) when no GOOGLE_API_KEY is set.
+
 const testRAG = async () => {
   try {
     const response = await fetch('http://localhost:3000/api/chat', {

@@ -1,0 +1,29 @@
+# CrowdGuard ML Backend dependencies
+# Run: pip install -r requirements.txt
+# Start: uvicorn main:app --host 0.0.0.0 --port 8001
+
+# --- Web framework / server ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20   # REQUIRED for UploadFile/Form parsing (FastAPI raises without it)
+pydantic==2.10.4
+
+# --- Data / numerics ---
+pandas==2.2.3
+numpy==1.26.4
+
+# --- Computer vision (anomaly detection) ---
+opencv-python-headless==4.10.0.84
+ultralytics==8.3.55        # YOLOv8 inference
+
+# --- Crowd-density prediction model ---
+xgboost==2.1.3
+scikit-learn==1.6.0
+
+# --- OPTIONAL: face recognition for /person/register and /person/match ---
+# These two endpoints degrade gracefully to HTTP 503 when these are NOT installed.
+# dlib must compile from source and requires CMake + a working C++ toolchain
+# (e.g. Visual Studio Build Tools on Windows, build-essential on Linux). If you
+# do not need lost-person face matching, you can safely skip both lines below.
+# dlib==19.24.6
+# face_recognition==1.3.0
